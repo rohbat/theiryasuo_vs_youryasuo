@@ -8,7 +8,7 @@ import numpy as np
 
 from lol_online.db import get_db
 
-from . import riot_api
+from . import riot_api, aggregate_stats
 
 lolstats = Blueprint('lolstats', __name__)
 
@@ -30,23 +30,40 @@ def read_players():
 	df = pd.read_sql('SELECT * FROM players', con=db)
 	return df.to_html(index=False)
 
+# ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+
 @lolstats.route('/test')
 def test(account_name='vayneofcastamere'):
 	create_temporary_tables()
+	account_id = riot_api.get_account_id(account_name)
 
-	df_games, df_players = collect_games_players_dataframes(account_name)
-	print(df_games)
-	print(df_players)
+	df_games, df_players = collect_games_players_dataframes(account_id)
 
-	return df_games.to_html()
+	# print(df_games)
+	# print(df_players)
+
+	# print(aggregate_stats.oldest_game(df_games))
+	# print(aggregate_stats.newest_game(df_games))
+
+	# df_p is the players table only including entires played by desired player
+	df_p = aggregate_stats.get_player_games(account_id, df_players)
+	print(aggregate_stats.played_unplayed_champions(df_p))
+
+
+
+	return df_p.to_html()
+
+
+# ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 	
 
 
-def collect_games_players_dataframes(account_name):
+def collect_games_players_dataframes(account_id):
 	db = get_db()
 
-	account_id = riot_api.get_account_id(account_name)
+
 	df_games, df_players = build_new_dataframe_tables(account_id)
 
 	if not df_games.empty:

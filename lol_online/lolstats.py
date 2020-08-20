@@ -42,17 +42,18 @@ def test(account_name='vayneofcastamere'):
 
 	# print(df_games)
 	# print(df_players)
-
 	# print(aggregate_stats.oldest_game(df_games))
 	# print(aggregate_stats.newest_game(df_games))
 
 	# df_p is the players table only including entires played by desired player
 	df_p = aggregate_stats.get_player_games(account_id, df_players)
-	print(aggregate_stats.played_unplayed_champions(df_p))
+	df_a, df_e = aggregate_stats.players_by_team(account_id, df_p, df_players)
+	
+
+	wr_p = aggregate_stats.wr_by_player_champ(df_p)
 
 
-
-	return df_p.to_html()
+	return wr_p.to_html()
 
 
 # ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~

@@ -34,38 +34,44 @@ def read_players():
 
 
 @lolstats.route('/test')
-def test(account_name='vayneofcastamere'):
+def test(account_name='omicronalpha'):
 	create_temporary_tables()
 	account_id = riot_api.get_account_id(account_name)
 
 	df_games, df_players = collect_games_players_dataframes(account_id)
-
-	# print(df_games)
-	# print(df_players)
-	# print(aggregate_stats.oldest_game(df_games))
-	# print(aggregate_stats.newest_game(df_games))
-
-	# df_p is the players table only including entires played by desired player
 	df_p = aggregate_stats.get_player_games(account_id, df_players)
 	df_a, df_e = aggregate_stats.players_by_team(account_id, df_p, df_players)
-	
+	df_pwr = aggregate_stats.winrate_by_champ(df_p)
+	df_awr = aggregate_stats.winrate_by_champ(df_a)
+	df_ewr = aggregate_stats.winrate_by_champ(df_e)
 
-	wr_p = aggregate_stats.wr_by_player_champ(df_p)
+	oldest = aggregate_stats.oldest_game(df_games)
+	newest = aggregate_stats.newest_game(df_games)
+	# df_p is the players table only including entires played by desired player
+
+	# df_*wr are player, ally, enemy winrates
+	df_pg = aggregate_stats.join_player_games(df_p, df_games)
+
+	df_brwr = aggregate_stats.blue_red_winrate(df_pg)
+
+	df_gd = aggregate_stats.game_durations(df_pg)
+	df_yas = aggregate_stats.their_yasuo_vs_your_yasuo(df_awr, df_ewr)
 
 
-	return wr_p.to_html()
+
+	# print(df_pwr, df_pwr.games.sum(), df_pwr.wins.sum(), df_pwr.losses.sum())
+	# print(df_awr, df_awr.games.sum(), df_awr.wins.sum(), df_awr.losses.sum())
+	# print(df_ewr, df_ewr.games.sum(), df_ewr.wins.sum(), df_ewr.losses.sum())
+	drop_temporary_tables()
+	return '<h1>TEST</h1>' + df_pwr.sort_values('p_value').to_html()
 
 
 # ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
-	
-
-
 def collect_games_players_dataframes(account_id):
 	db = get_db()
 
-
-	df_games, df_players = build_new_dataframe_tables(account_id)
+	df_games, df_players, df_remakes = build_new_dataframe_tables(account_id)
 
 	if not df_games.empty:
 		df_games.to_sql('new_games', con=db, if_exists='append', index=True)
@@ -81,6 +87,10 @@ def collect_games_players_dataframes(account_id):
 		df_games = pd.read_sql('SELECT * FROM preexisting_games', con=db, index_col='game_id')
 		df_players = pd.read_sql('SELECT * FROM preexisting_players', con=db)
 
+	if not df_remakes.empty:
+		df_remakes.to_sql('games', con=db, if_exists='append', index=True)
+
+
 	return df_games, df_players
 
 
@@ -89,20 +99,37 @@ def build_new_dataframe_tables(account_id):
 	constructs and returns df_games and df_players from game data newly collected from riot
 	these will be used for analysis and then inserted into the database
 	'''
+
 	df_games = riot_api.get_matchlist(account_id)
+	# df_games.to_csv('temp_matchlist.csv')
+	# df_games = pd.read_csv('temp_matchlist.csv', index_col=0)
+
+	total_games = len(df_games)
+	print('total games:', total_games)
 	df_games = determine_games_to_collect(df_games)
+	games_to_collect = len(df_games)
+	print('games currently in database:', total_games - games_to_collect)
+	print('games to collect:', len(df_games))
+
 	if df_games.empty:
 		df_games = pd.DataFrame(columns=['game_id', 'queue', 'duration', 'winner', 'forfeit', 'duration'])
 		df_games.set_index('game_id', inplace=True)
 		df_players = pd.DataFrame(columns=['game_id', 'player_id', 'champion_id', 'win'])
-		return  df_games, df_players
+		df_remakes = pd.DataFrame(columns=['game_id', 'queue', 'duration', 'winner', 'forfeit', 'duration'])
+		df_remakes.set_index('game_id', inplace=True)
+		return  df_games, df_players, df_remakes
 
 	df_m = riot_api.get_matches(df_games)
 	blue_win = lambda x: x[0]['win'] == 'Win'
-	winner = np.where(df_m.teams.apply(blue_win), 100, 200)
-	df_games['winner'] = winner
+	df_games['winner'] = np.where(df_m.teams.apply(blue_win), 100, 200)
 	df_games['duration'] = df_m.gameDuration
 	df_games['forfeit'] = riot_api.get_forfeits(df_games)
+
+	# filter out remakes--this is hidden but important
+	df_games, df_remakes = riot_api.filter_remakes(df_games)
+	df_m, _ = riot_api.filter_remakes(df_m)
+	print('valid games:', len(df_games))
+	print('remakes:', len(df_remakes))
 
 	extract_player_id = lambda x, i: x[i]['player']['accountId']
 	extract_champion_id = lambda x, i: x[i]['championId']
@@ -112,22 +139,25 @@ def build_new_dataframe_tables(account_id):
 	champion_ids = []
 	wins = []
 	game_ids = []
+	# 10 players per game is hardcoded here
 	for i in range(10):
 		player_ids.extend(list(df_m.participantIdentities.apply(extract_player_id, args=(i,))))
 		champion_ids.extend(list(df_m.participants.apply(extract_champion_id, args=(i,))))
-		wins.extend(list((df_m.participants.apply(extract_team, args=(i,)) == winner).apply(int)))
+		wins.extend(list((df_m.participants.apply(extract_team, args=(i,)) == df_games.winner).apply(int)))
 		game_ids.extend(list(df_m.index))
 
-	df_players = pd.DataFrame()
-	df_players['game_id'] = game_ids
-	df_players['player_id'] = player_ids
-	df_players['champion_id'] = champion_ids
-	df_players['win'] = wins
+	df_players = pd.DataFrame({'game_id': game_ids, 'player_id': player_ids, 'champion_id': champion_ids, 'win': wins})
 
-	df_players.to_csv('df_players.csv')
-	df_games.to_csv('df_games.csv')
+	# df_players.to_csv('df_players.csv')
+	# df_games.to_csv('df_games.csv')
+	# print('df_games')
+	# print(df_games)
+	# print('df_players')
+	# print(df_players)
+	# print('df_remakes')
+	# print(df_remakes)
 
-	return df_games, df_players
+	return df_games, df_players, df_remakes
 
 
 def determine_games_to_collect(df_games):
@@ -136,7 +166,6 @@ def determine_games_to_collect(df_games):
 	returns df consisting of games that still need to be downloaded from api
 	'''
 	db = get_db()
-	df_games = riot_api.filter_by_queue(df_games)
 	pd.Series(data=df_games.index, name='game_id').to_sql('matchlist', db, if_exists='append', index=False)
 	db.execute('''
 				INSERT INTO preexisting_games(game_id, queue, duration, winner, forfeit, creation)

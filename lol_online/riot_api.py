@@ -14,31 +14,34 @@ from .api_key import API_KEY
 
 # global
 REGION = 'na1'
-#API_KEY = api_key.API_KEY
 
 def get_matchlist(account_id, region=REGION):
 	''' retrieves list of all matches for the given account id and returns as a dataframe '''
 	watcher = LolWatcher(API_KEY)
 	matches = []
 	i = 0
+	# queue ids limit the games to 5v5 sr (norms, draft, flex, soloq, clash)
+	valid_queue_ids = [400, 420, 430, 440, 700]
 
-	matches.append(watcher.match.matchlist_by_account(region, account_id, begin_index=0, end_index=100))
-	# while True:
-	# 	try:
-	# 		# could potentially limit to desired game modes here~~
-	# 		match = watcher.match.matchlist_by_account(region, account_id, begin_index=100*i, end_index=100*(i+1))
-	# 		if match['matches']:
-	# 			matches.append(match)
-	# 			i += 1
-	# 			time.sleep(.1)
-	# 			print(i*100, '/ ?')
-	# 		else:
-	# 			break
-	# 	except:
-	# 		pass
+	print('fetching matchlist:')
+	# matches.append(watcher.match.matchlist_by_account(region, account_id, begin_index=0, end_index=10))
+	while True:
+		try:
+			match = watcher.match.matchlist_by_account(region, account_id, queue=valid_queue_ids, begin_index=100*i)
+			if match['matches']:
+				matches.append(match)
+				i += 1
+				time.sleep(.1)
+				print((i - 1) * 100, '/ ?')
+			else:
+				break
+		except:
+			pass
+	
 
 	all_matches = [m for match in matches for m in match['matches']]
 	df = pd.DataFrame(all_matches)
+	print(len(df), '/', len(df))
 	df.rename({'timestamp':'creation', 'gameId': 'game_id'}, axis=1, inplace=True)
 	df.set_index('game_id', inplace=True)
 	df.drop(['season', 'role', 'lane', 'platformId', 'champion'], axis=1, inplace=True)
@@ -63,6 +66,7 @@ def get_timelines(game_ids, region=REGION):
 	game_ids_success = []
 	failed = []
 
+	print('fetching timelines:')
 	# better way to try 3 times??
 	for i, game_id in enumerate(game_ids):
 		try:
@@ -80,10 +84,10 @@ def get_timelines(game_ids, region=REGION):
 					game_ids_success.append(game_id)
 				except:
 					failed.append(game_id)
-		if not i % 10:
+		if not i % 50:
 			print(i, '/', len(game_ids))
 		time.sleep(1.5)
-	print(len(game_ids), '/', len(game_ids))
+	print(len(game_ids_success), '/', len(game_ids_success))
 	if failed:
 		print('game ids failed:', failed)
 
@@ -121,6 +125,7 @@ def get_matches(df, region=REGION):
 	game_ids_success = []
 	failed = []
 
+	print('fetching matches:')
 	# better way to try 3 times??
 	for i, game_id in enumerate(df.index.values):
 		try:
@@ -138,12 +143,12 @@ def get_matches(df, region=REGION):
 					game_ids_success.append(game_id)
 				except:
 					failed.append(game_id)
-		if not i % 10:
+		if not i % 50:
 			print(i, '/', len(df))
 		time.sleep(1.5)
-	print(len(game_ids_success), '/', len(df))
+	print(len(game_ids_success), '/', len(game_ids_success))
 	if failed:
-		print('game ids failed', failed)
+		print('game ids failed:', failed)
 
 	df_m = pd.DataFrame(matches)
 	df_m.index = df_m.gameId
@@ -152,72 +157,25 @@ def get_matches(df, region=REGION):
 	df_m.sort_index(inplace=True)
 	return df_m
 
-
-def filter_by_queue(df, queue='sr'):
-	# only for 5v5 sr right now
-	valid_queue_ids = {
-		'sr': [400, 420, 430, 440, 700],
-	}
-	queue_mask = df.queue.apply(lambda x: x in valid_queue_ids[queue])
-	return df[queue_mask]
+def filter_remakes(df):
+	'''
+	returns tuple (full-length games, remakes)
+	'''
+	if 'duration' in df.columns:
+		remake_mask = df.duration > 300
+	elif 'gameDuration' in df.columns:
+		remake_mask = df.gameDuration > 300
+	print(df[remake_mask])
+	print(df[~remake_mask])
+	return df[remake_mask], df[~remake_mask]
 
 def get_account_id(account_name):
 	watcher = LolWatcher(API_KEY)
 	account = watcher.summoner.by_name(REGION, account_name)
 	return account['accountId']
 
-
-def get_from_api(account_name):
-	''' retrieve datasets from riot '''
-	watcher = LolWatcher(API_KEY)
-	try:
-		account_id = get_account_id(account_name)
-	except ApiError as err:
-		print('Error. Restart and try again.')
-		quit()
-
-	df = get_matchlist(account_id, REGION)
-	print('got matchlist')
-	df = filter_by_queue(df)
-	df_m = get_matches(df.index.values, REGION)
-	print('got matches')
-
-	blue_win = lambda x: x[0]['win'] == 'Win'
-	df['winner'] = np.where(df_m.teams.apply(blue_win), 100, 200)
-	df['duration'] = df_m.gameDuration
-	df['forfeit'] = get_forfeits(df, REGION)
-	print('got timelines')
-
-
-
-	df = df[df.duration > 300]
-	df.drop('champion', axis=1, inplace=True)
-	return df
-
-
-
-
-
-
-
-
-def append_games():
-	conn = sqlite3.connect()
-	pass
-
-def create_players():
-	pass
-
-
 def main():
-	print('Input account name:')
-	account_name = input()
-
-	df = get_from_api(account_name)
-
-
-	append_games(df)
-
+	pass
 
 if __name__ == '__main__':
 	main()

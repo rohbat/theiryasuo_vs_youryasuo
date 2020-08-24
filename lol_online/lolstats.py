@@ -32,9 +32,10 @@ def read_players():
 
 # ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
+ACCOUNT_NAME = 'vayneofcastamere'
 
 @lolstats.route('/test')
-def test(account_name='omicronalpha'):
+def test(account_name=ACCOUNT_NAME):
 	create_temporary_tables()
 	account_id = riot_api.get_account_id(account_name)
 
@@ -54,16 +55,15 @@ def test(account_name='omicronalpha'):
 
 	df_brwr = aggregate_stats.blue_red_winrate(df_pg)
 
-	df_gd = aggregate_stats.game_durations(df_pg)
+	df_gd = aggregate_stats.average_game_durations(df_pg)
 	df_yas = aggregate_stats.their_yasuo_vs_your_yasuo(df_awr, df_ewr)
-
-
 
 	# print(df_pwr, df_pwr.games.sum(), df_pwr.wins.sum(), df_pwr.losses.sum())
 	# print(df_awr, df_awr.games.sum(), df_awr.wins.sum(), df_awr.losses.sum())
 	# print(df_ewr, df_ewr.games.sum(), df_ewr.wins.sum(), df_ewr.losses.sum())
 	drop_temporary_tables()
-	return '<h1>TEST</h1>' + df_pwr.sort_values('p_value').to_html()
+
+	return df_gd.to_html(index_names=False) + aggregate_stats.game_durations_plot(df_pg)
 
 
 # ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
@@ -100,9 +100,9 @@ def build_new_dataframe_tables(account_id):
 	these will be used for analysis and then inserted into the database
 	'''
 
-	df_games = riot_api.get_matchlist(account_id)
+	# df_games = riot_api.get_matchlist(account_id)
 	# df_games.to_csv('temp_matchlist.csv')
-	# df_games = pd.read_csv('temp_matchlist.csv', index_col=0)
+	df_games = pd.read_csv('temp_matchlist.csv', index_col=0)
 
 	total_games = len(df_games)
 	print('total games:', total_games)
